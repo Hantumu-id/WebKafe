@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kitchen Display - Bintang Karang</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        patrick: { pink: '#FFC0CB', teal: '#4DB6AC', yellow: '#FFF9C4', bgTeal: '#E0F2F1' }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-100 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shrink-0">
+        <div>
+            <h1 class="text-xl font-bold text-gray-800">Dapur Bintang Karang</h1>
+            <p class="text-xs text-gray-500 flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                Live Connection
+            </p>
+        </div>
+        <div class="flex gap-2">
+            <!-- Filter Tabs -->
+            <button onclick="setFilter('pending')" id="tab-pending" class="px-4 py-2 bg-patrick-pink text-white rounded-lg font-bold text-sm shadow-md transition">Baru (<span id="count-pending">0</span>)</button>
+            <button onclick="setFilter('process')" id="tab-process" class="px-4 py-2 bg-white text-gray-600 rounded-lg font-bold text-sm border hover:bg-gray-50 transition">Proses (<span id="count-process">0</span>)</button>
+            <button onclick="setFilter('ready')" id="tab-ready" class="px-4 py-2 bg-white text-gray-600 rounded-lg font-bold text-sm border hover:bg-gray-50 transition">Selesai</button>
+        </div>
+    </header>
+
+    <!-- Orders Container -->
+    <main class="flex-1 overflow-y-auto p-6">
+        <div id="orders-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <!-- Order Cards injected via Firebase -->
+            <div class="col-span-full text-center text-gray-400 mt-20">
+                Memuat data dari Firebase...
+            </div>
+        </div>
+    </main>
+
+    <!-- FIREBASE SCRIPT -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, onSnapshot, doc, updateDoc, orderBy, query } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // --- KONFIGURASI FIREBASE ---
+        // HARUS SAMA PERSIS DENGAN YANG DI client.html
+        const firebaseConfig = {
+  apiKey: "AIzaSyCfN6nDGb7cLY21n0tl1dD0h8boSqsSI9k",
+  authDomain: "kafegue-7c39d.firebaseapp.com",
+  projectId: "kafegue-7c39d",
+  storageBucket: "kafegue-7c39d.firebasestorage.app",
+  messagingSenderId: "713529737766",
+  appId: "1:713529737766:web:26c45dfe58f7137ffb9ce7",
+  measurementId: "G-MD7SPPGV1K"
+};
+
+        let db;
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+        } catch (e) {
+            console.error(e);
+        }
+
+        // Global functions
+        window.db = db;
+        window.doc = doc;
+        window.updateDoc = updateDoc;
+        
+        // --- REALTIME LISTENER ---
+        const q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
+        
+        // Variabel lokal untuk menyimpan data
+        let allOrders = [];
+        let currentFilter = 'pending';
+
+        // Mendengarkan perubahan data
+        onSnapshot(q, (snapshot) => {
+            allOrders = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+            
+            updateCounts();
+            renderOrders();
+            
+            // Opsional: Bunyikan suara notif jika ada order baru dengan status 'pending'
+            const hasNewOrder = snapshot.docChanges().some(change => change.type === 'added' && change.doc.data().status === 'pending');
+            if(hasNewOrder) {
+                // new Audio('ding.mp3').play().catch(e => {}); // Uncomment jika ada file audio
+                console.log("Order baru masuk!");
+            }
+        });
+
+        window.setFilter = function(status) {
+            currentFilter = status;
+            
+            // Update Tab Styles
+            document.querySelectorAll('header button').forEach(btn => {
+                btn.className = "px-4 py-2 bg-white text-gray-600 rounded-lg font-bold text-sm border hover:bg-gray-50 transition";
+            });
+            
+            const activeBtn = document.getElementById(`tab-${status}`);
+            if(status === 'pending') activeBtn.className = "px-4 py-2 bg-patrick-pink text-white rounded-lg font-bold text-sm shadow-md transition";
+            if(status === 'process') activeBtn.className = "px-4 py-2 bg-patrick-yellow text-yellow-800 rounded-lg font-bold text-sm shadow-md transition";
+            if(status === 'ready') activeBtn.className = "px-4 py-2 bg-patrick-teal text-white rounded-lg font-bold text-sm shadow-md transition";
+
+            renderOrders();
+        }
+
+        function updateCounts() {
+            document.getElementById('count-pending').innerText = allOrders.filter(o => o.status === 'pending').length;
+            document.getElementById('count-process').innerText = allOrders.filter(o => o.status === 'process').length;
+        }
+
+        function renderOrders() {
+            const grid = document.getElementById('orders-grid');
+            grid.innerHTML = '';
+
+            const filtered = allOrders.filter(o => o.status === currentFilter);
+
+            if(filtered.length === 0) {
+                grid.innerHTML = `<div class="col-span-full text-center text-gray-400 mt-20">Tidak ada pesanan di tab ini</div>`;
+                return;
+            }
+
+            filtered.forEach(order => {
+                // Hitung waktu (opsional, simplifikasi)
+                const timeStr = order.createdAt ? new Date(order.createdAt.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '-';
+
+                // Items HTML
+                let itemsHtml = order.items.map(item => `
+                    <div class="flex justify-between py-1 border-b border-dashed border-gray-100 last:border-0">
+                        <span class="text-sm font-bold text-gray-700">${item.qty}x ${item.name}</span>
+                    </div>
+                `).join('');
+
+                // Tombol Aksi
+                let btnAction = '';
+                let cardBorder = '';
+
+                if(order.status === 'pending') {
+                    cardBorder = 'border-l-4 border-patrick-pink';
+                    btnAction = `<button onclick="updateOrderStatus('${order.id}', 'process')" class="w-full mt-4 py-2 bg-patrick-pink text-white rounded-lg font-bold hover:bg-pink-400">Terima & Racik</button>`;
+                } else if (order.status === 'process') {
+                    cardBorder = 'border-l-4 border-patrick-yellow';
+                    btnAction = `<button onclick="updateOrderStatus('${order.id}', 'ready')" class="w-full mt-4 py-2 bg-patrick-yellow text-yellow-800 rounded-lg font-bold hover:bg-yellow-200">Selesai</button>`;
+                } else {
+                    cardBorder = 'border-l-4 border-patrick-teal opacity-60';
+                    btnAction = `<div class="w-full mt-4 py-2 bg-gray-100 text-gray-400 text-center rounded-lg font-bold text-sm">Selesai</div>`;
+                }
+
+                const card = document.createElement('div');
+                card.className = `bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition ${cardBorder}`;
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-3">
+                        <div>
+                            <h3 class="font-bold text-lg">${order.customerName}</h3>
+                            <span class="text-xs font-semibold bg-gray-100 px-2 py-1 rounded text-gray-500">${order.tableNumber}</span>
+                        </div>
+                        <span class="text-xs font-mono text-gray-400">${timeStr}</span>
+                    </div>
+                    <div class="space-y-1 bg-gray-50 p-3 rounded-lg">
+                        ${itemsHtml}
+                    </div>
+                    ${btnAction}
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        // Fungsi Global untuk update status di Firebase
+        window.updateOrderStatus = async function(id, status) {
+            try {
+                const orderRef = window.doc(window.db, "orders", id);
+                await window.updateDoc(orderRef, {
+                    status: status
+                });
+            } catch (e) {
+                console.error("Error updating status: ", e);
+                alert("Gagal update status.");
+            }
+        }
+    </script>
+</body>
+</html>
+
